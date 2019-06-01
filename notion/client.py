@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import uuid
 
 from requests import Session, HTTPError
@@ -225,7 +226,7 @@ class NotionClient(object):
 
         return record_id
 
-    def import_file(self, filename, page_id):
+    def import_file(self, filename, page_id, wait=True):
         with open(filename, "rb") as f:
             file_content = f.read()
         basename = os.path.basename(filename)
@@ -238,7 +239,7 @@ class NotionClient(object):
             },
         ).json()
         self._aws_session.put(file_urls["signedPutUrl"], data=file_content)
-        self.post(
+        resp_task = self.post(
             "enqueueTask",
             {
                 "task": {
@@ -251,7 +252,19 @@ class NotionClient(object):
                     },
                 }
             },
-        )
+        ).json()
+        if wait:
+            done = False
+            while not done:
+                time.sleep(0.2)
+                resp_status = self.post(
+                    "getTasks",
+                    {
+                        "taskIds": [resp_task["taskId"]],
+                    }
+                ).json()
+                if len(resp_status["results"]) > 0:
+                    done = resp_status["results"][0]["state"] == "success"
 
 
 class Transaction(object):
