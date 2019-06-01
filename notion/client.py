@@ -124,12 +124,12 @@ class NotionClient(object):
         row_ids = self.search_pages_with_parent(collection_id)
         self._store.set_collection_rows(collection_id, row_ids)
 
-    def post(self, endpoint, data):
+    def post(self, endpoint, data, timeout=None):
         """
         All API requests on Notion.so are done as POSTs (except the websocket communications).
         """
         url = urljoin(API_BASE_URL, endpoint)
-        response = self.session.post(url, json=data)
+        response = self.session.post(url, json=data, timeout=timeout)
         if response.status_code == 400:
             logger.error("Got 400 error attempting to POST to {}, with data: {}".format(endpoint, json.dumps(data, indent=2)))
             raise HTTPError(response.json().get("message", "There was an error (400) submitting the request."))
@@ -226,7 +226,7 @@ class NotionClient(object):
 
         return record_id
 
-    def import_file(self, filename, page_id, wait=True):
+    def import_file(self, filename, page_id, wait=True, timeout=30):
         with open(filename, "rb") as f:
             file_content = f.read()
         basename = os.path.basename(filename)
@@ -255,16 +255,23 @@ class NotionClient(object):
         ).json()
         if wait:
             done = False
-            while not done:
-                time.sleep(0.2)
+            time_status_start = time.monotonic()
+            while not done and (time.monotonic() - time_status_start) < timeout:
+                time.sleep(1)
                 resp_status = self.post(
                     "getTasks",
                     {
                         "taskIds": [resp_task["taskId"]],
-                    }
+                    },
+                    timeout=(2, 10)
                 ).json()
                 if len(resp_status["results"]) > 0:
                     done = resp_status["results"][0]["state"] == "success"
+            if not done:
+                raise Exception(
+                    "import_file: getTasks timeout after %.1fsec"
+                    % (time.monotonic() - time_status_start)
+                )
 
 
 class Transaction(object):
