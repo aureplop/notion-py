@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import uuid
 
@@ -29,6 +30,7 @@ class NotionClient(object):
     def __init__(self, token_v2, monitor=True, start_monitoring=True, cache_key=None):
         self.session = Session()
         self.session.cookies = cookiejar_from_dict({"token_v2": token_v2})
+        self._aws_session = Session()
         cache_key = cache_key or hashlib.sha256(token_v2.encode()).hexdigest()
         self._store = RecordStore(self, cache_key=cache_key)
         if monitor:
@@ -107,7 +109,7 @@ class NotionClient(object):
             assert collection is not None, "If 'url_or_id' is an ID (not a URL), you must also pass the 'collection'"
 
         view = self.get_record_data("collection_view", view_id, force_refresh=force_refresh)
-        
+
         return COLLECTION_VIEW_TYPES.get(view.get("type", ""), CollectionView)(self, view_id, collection=collection) if view else None
 
     def refresh_records(self, **kwargs):
@@ -222,6 +224,34 @@ class NotionClient(object):
                 )
 
         return record_id
+
+    def import_file(self, filename, page_id):
+        with open(filename, "rb") as f:
+            file_content = f.read()
+        basename = os.path.basename(filename)
+        file_urls = self.post(
+            "getUploadFileUrl",
+            {
+                "bucket": "temporary",
+                "name": basename,
+                "contentType": "text/markdown",
+            },
+        ).json()
+        self._aws_session.put(file_urls["signedPutUrl"], data=file_content)
+        self.post(
+            "enqueueTask",
+            {
+                "task": {
+                    "eventName": "importFile",
+                    "request": {
+                        "fileName": basename,
+                        "fileURL": file_urls["url"],
+                        "importType": "ReplaceBlock",
+                        "pageId": page_id,
+                    },
+                }
+            },
+        )
 
 
 class Transaction(object):
