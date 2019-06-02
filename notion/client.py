@@ -265,8 +265,24 @@ class NotionClient(object):
                     },
                     timeout=(2, 10)
                 ).json()
-                if len(resp_status["results"]) > 0:
-                    done = resp_status["results"][0]["state"] == "success"
+                task_state = resp_status["results"][0]["state"]
+                done = task_state == "success"
+                failure = task_state == "failure"
+                if failure:
+                    resp_task = self.post(
+                        "enqueueTask",
+                        {
+                            "task": {
+                                "eventName": "importFile",
+                                "request": {
+                                    "fileName": basename,
+                                    "fileURL": file_urls["url"],
+                                    "importType": "ReplaceBlock",
+                                    "pageId": page_id,
+                                },
+                            }
+                        },
+                    ).json()
             if not done:
                 raise Exception(
                     "import_file: getTasks timeout after %.1fsec"
